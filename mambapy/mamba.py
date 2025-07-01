@@ -8,6 +8,8 @@ import torch.nn.functional as F
 
 from mambapy.pscan import pscan
 
+import time
+
 """
 
 This file closely follows the mamba_simple.py from the official Mamba implementation, and the mamba-minimal by @johnma2006.
@@ -54,7 +56,7 @@ class MambaConfig:
     mup_base_width: float = 128 # width=d_model
 
     pscan: bool = True # use parallel scan mode or sequential mode when training
-    use_cuda: bool = False # use official CUDA implementation when training (not compatible with (b)float16)
+    use_cuda: bool = True # use official CUDA implementation when training (not compatible with (b)float16)
 
     def __post_init__(self):
         self.d_inner = self.expand_factor * self.d_model # E*D = ED in comments
@@ -207,7 +209,6 @@ class MambaBlock(nn.Module):
         
         # y : (B, L, D)
 
-
         _, L, _ = x.shape
 
         xz = self.in_proj(x) # (B, L, 2*ED)
@@ -215,7 +216,10 @@ class MambaBlock(nn.Module):
 
         # x branch
         x = x.transpose(1, 2) # (B, ED, L)
+        start_conv = time.time()
         x = self.conv1d(x)[:, :, :L] # depthwise convolution over time, with a short filter
+        end_conv = time.time()
+        print(f"Convolution time: {end_conv - start_conv:.4f} seconds")
         x = x.transpose(1, 2) # (B, L, ED)
 
         x = F.silu(x)
@@ -265,7 +269,10 @@ class MambaBlock(nn.Module):
             delta = F.softplus(delta + self.dt_proj.bias)
 
             if self.config.pscan:
+                start_prefix = time.time()
                 y = self.selective_scan(x, delta, A, B, C, D)
+                end_prefix = time.time()
+                print(f"Selective scan time: {end_prefix - start_prefix:.4f} seconds")
             else:
                 y = self.selective_scan_seq(x, delta, A, B, C, D)
 
